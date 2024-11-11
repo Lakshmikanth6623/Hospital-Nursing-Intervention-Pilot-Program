@@ -1,0 +1,1027 @@
+---
+title: "DA5020.P2.Group5"
+author: "DA5020 Group5:Hesen Huang,Lakshmi Kanth Reddy Chavva,Srijitha Gangi,Urmeshree Magesh"
+output:
+  html_document:
+    df_print: paged
+---
+
+## Introduction
+ 
+In this project, we are analyzing ICU and SICU bed capacities across hospitals to identify facilities with the highest licensed, staffed, and census beds. By isolating ICU and SICU bed data, we identify top hospitals with robust critical care resources and those facing high patient demand. Visualizations reveal specialization patterns in ICU and SICU usage, guiding recommendations for targeted resource allocation. Our final recommendations prioritize high-capacity hospitals for a pilot intervention program, helping leadership make informed decisions to enhance critical care efficiency and patient outcomes.
+
+## Question 1
+
+### Identify the dimensions from each dimension table 
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(DBI)
+library(RSQLite)
+library(tidyr)
+
+# Load the data
+bed_type <- read.csv("bed_type-1.csv")
+business <- read.csv("business-1.csv")
+bed_fact <- read.csv("bed_fact-1.csv")
+
+con <- dbConnect(RSQLite::SQLite())
+dbWriteTable(con, "bed_fact", bed_fact)
+dbWriteTable(con, "business", business)
+dbWriteTable(con, "bed_type", bed_type)
+
+# Identify Dimensions in each Dimension Table
+
+# Taking the Dimensions in bed_type.csv 
+bed_type_dimensions <- dbGetQuery(con, "SELECT bed_id, bed_code, bed_desc FROM bed_type") # All columns are dimensions
+
+# Taking the Dimensions business.csv
+business_dimensions <- dbGetQuery(con, "SELECT ims_org_id, business_name FROM business") # Assume ims_org_id, business_name, and potentially other fields are dimensions
+
+```
+
+### Explanation :
+1. This code loads the `bed_type`, `business`, and `bed_fact` datasets and writes them to an in-memory SQLite database.
+   This allows us to perform SQL queries on these tables for further analysis.
+
+2. In the `bed_type` table, all columns (`bed_id`, `bed_code`, and `bed_desc`) are considered dimensions. 
+    They provide descriptive information about each type of bed but are not quantitative or measurable facts.
+
+3. In the `business` table, `ims_org_id` (primary key) and `business_name` are also dimensions. These columns
+   describe the hospital or business entity but do not represent measurable data.
+
+By identifying the dimensions in each table, we separate the descriptive attributes from the fact (quantitative) data,
+setting up the foundation for further analysis that might focus on facts or summary statistics.
+
+## Question 2
+
+#### Identify the Facts variables from the single Fact Table 
+
+```{r}
+# Identify Facts and Dimensions in the Fact Table (bed_fact.csv)
+
+# In bed_fact, select facts and identify dimensions (foreign keys)
+# Facts: license_beds, census_beds, staffed_beds
+# Dimensions: ims_org_id (link to business), bed_id (link to bed_type)
+bed_fact_facts <- dbGetQuery(con, "SELECT license_beds, census_beds, staffed_beds FROM bed_fact") # These are the facts
+
+bed_fact_dimensions <- dbGetQuery(con, "SELECT ims_org_id, bed_id FROM bed_fact") # Foreign keys, so they are dimensions
+
+```
+
+### Explanation:
+1. This code identifies the fact (quantitative) variables and dimension (foreign key) variables in the `bed_fact` table.
+
+2. Facts:
+    - `license_beds`, `census_beds`, and `staffed_beds` represent measurable quantities, making them facts.
+      These columns store numerical data related to bed capacity and utilization in hospitals.
+
+3. Dimensions:
+    - `ims_org_id` and `bed_id` are foreign keys, linking this table to the `business` and `bed_type` tables, respectively.
+      These columns categorize the facts by hospital and bed type, so they are classified as dimensions.
+
+ This separation of facts and dimensions helps in analyzing the data effectively. 
+Facts allow us to perform calculations or aggregations, while dimensions enable grouping or filtering based on hospital or bed type.
+
+# Question 3
+
+### (3a) Analysis for Leadership 
+
+Merging the tables to bring in hospital (business_name) and filter for ICU and SICU beds.
+Note: # Assuming `bed_fact`, `business`, and other setup code have been executed to create the SQLite database in memory.
+
+```{r}
+
+# Merge the tables to bring in hospital (business_name) and filter for ICU and SICU beds
+# Load necessary libraries
+library(ggplot2)
+library(DBI)
+library(RSQLite)
+
+# Drop the table if it exists
+dbExecute(con, "DROP TABLE IF EXISTS icu_sicu_beds;")
+# Assuming `bed_fact`, `business`, and other setup code have been executed to create the SQLite database in memory.
+# Create and populate `icu_sicu_beds_df` table in one query
+icu_sicu_beds <- dbExecute(con, "
+    
+CREATE TABLE icu_sicu_beds AS
+    SELECT 
+        bf.ims_org_id,
+        b.business_name,
+        bf.bed_id,
+        CASE 
+            WHEN bf.bed_id = 4 THEN 'ICU'
+            WHEN bf.bed_id = 15 THEN 'SICU'
+            ELSE NULL
+        END AS bed_type,
+        bf.license_beds,
+        bf.census_beds,
+        bf.staffed_beds
+    FROM 
+        bed_fact AS bf
+    JOIN 
+        business AS b 
+    ON 
+        bf.ims_org_id = b.ims_org_id
+    WHERE 
+        bf.bed_id IN (4, 15)
+        AND bf.license_beds IS NOT NULL
+        AND bf.census_beds IS NOT NULL
+        AND bf.staffed_beds IS NOT NULL;
+")
+
+# Retrieve the data from icu_sicu_beds_df
+icu_sicu_beds <- dbGetQuery(con, "SELECT * FROM icu_sicu_beds")
+str(icu_sicu_beds)
+
+```
+
+### Explanation:
+1. To creates a new table, `icu_sicu_beds`, that focuses specifically on ICU and SICU bed data for hospitals.
+2. It merges data from `bed_fact` and `business` tables to bring in the hospital name (`business_name`) and includes
+   only rows with ICU (`bed_id = 4`) and SICU (`bed_id = 15`) beds.
+3. A new column, `bed_type`, is created to label each row as either "ICU" or "SICU" based on the `bed_id`.
+4. The final table, `icu_sicu_beds`, includes:
+   - `ims_org_id`: Hospital identifier.
+    - `business_name`: Hospital name for easy identification.
+    - `bed_id` and `bed_type`: Identifiers and labels for ICU or SICU beds.
+    - `license_beds`, `census_beds`, and `staffed_beds`: Quantitative columns showing licensed, occupied, and staffed beds.
+
+The analysis prepares data for a leadership report on ICU and SICU bed capacity in hospitals. By isolating ICU and SICU beds and adding hospital names, leadership can:
+
+1. Evaluate ICU/SICU Capacity: The inclusion of `license_beds`, `census_beds`, and `staffed_beds` allows for assessing hospital capacity and resource utilization.
+2. Identify High-Capacity Hospitals: By later summarizing this data, we can identify which hospitals have the most ICU/SICU resources (both licensed and staffed), helping leadership make informed decisions for any interventions or pilot programs.
+3.Simplify the Further Analysis: With the `icu_sicu_beds` table, subsequent analysis steps can focus on ICU and SICU bed resources directly, streamlining the analysis without needing repeated table joins and filters.
+
+### The top 10 hospitals by total ICU or SICU License beds
+```{r}
+
+# SQL query to get the top 10 hospitals by total ICU or SICU license beds
+top_license_beds <- dbGetQuery(con, "
+SELECT 
+    business_name,
+    SUM(license_beds) AS total_license_beds
+FROM 
+    icu_sicu_beds
+GROUP BY 
+    business_name
+ORDER BY 
+    total_license_beds DESC
+LIMIT 10;
+")
+
+print("Top 10 Hospitals by License Beds (ICU or SICU):")
+top_license_beds
+
+# Enhanced Bar Plot with Color Gradient and Improved Data Labels
+ggplot(top_license_beds, aes(x = reorder(business_name, total_license_beds), y = total_license_beds, fill = total_license_beds)) +
+    geom_bar(stat = "identity") +
+    scale_fill_gradient(low = "lightblue", high = "darkblue") +
+    geom_text(aes(label = total_license_beds), hjust = ifelse(top_license_beds$total_license_beds > 200, 1.1, -0.1), color = "white", size = 4, fontface = "bold") +
+    coord_flip() +
+    labs(title = "Top 10 Hospitals by Total ICU/SICU \n License Beds",
+         x = "Hospital Name",
+         y = "Total License Beds") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = "none")
+
+# Line Plot for License Beds Trend with Extra Y-Axis Padding and Improved Label Positioning
+ggplot(top_license_beds, aes(x = reorder(business_name, total_license_beds), y = total_license_beds, group = 1)) +
+    geom_line(color = "steelblue", size = 1.5) +
+    geom_point(color = "darkblue", size = 4) +
+    geom_text(aes(label = total_license_beds), vjust = -1.2, color = "black", size = 4, fontface = "bold") +
+    labs(title = "Trend of Total ICU/SICU License Beds Across Top 10 Hospitals",
+         x = "Hospital Name",
+         y = "Total License Beds") +
+    scale_y_continuous(limits = c(min(top_license_beds$total_license_beds) - 10, max(top_license_beds$total_license_beds) + 20)) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+```
+
+## Explanation 
+#### Bar Plot
+The bar plot displays the **Top 10 Hospitals by Total ICU/SICU License Beds**. It shows each hospital's name on the y-axis and the number of licensed ICU/SICU beds on the x-axis, with a color gradient from light blue to dark blue, where darker colors represent a higher bed count. The exact bed count for each hospital is displayed as a label inside each bar for easy reference.
+
+#### Insights 
+- **Phoenix Children's Hospital** leads with the highest number of ICU/SICU licensed beds (247).
+- The top 5 hospitals have a similar range of beds (around 200 to 250), while the next 5 hospitals fall below 200.
+- This distribution indicates that a few hospitals have significantly higher ICU/SICU capacity, which may suggest their role as major healthcare providers within their regions.
+
+#### Line Plot
+The line plot illustrates the **Trend of Total ICU/SICU License Beds Across Top 10 Hospitals**. The x-axis represents the hospitals, ordered by bed count, and the y-axis shows the number of licensed beds. Each data point marks a hospital, with a connecting line showing the progression in bed numbers, and labels for each data point.
+
+#### Insights 
+- There's a gradual increase in the number of licensed beds from **Emory University Hospital** (lowest) to **Phoenix Children's Hospital** (highest), with some noticeable jumps between certain hospitals.
+- The trend line highlights how bed counts vary across these top hospitals, providing a clear visual of capacity differences.
+- This could imply that hospitals with higher ICU/SICU bed capacities may be prepared for more critical or specialized care, while those with fewer beds may focus on other services or serve less populous regions.
+
+#### Top 10 hospitals by Total ICU or SICU Census beds
+```{r}
+# SQL query to get the top 10 hospitals by total ICU or SICU census beds from icu_sicu_beds table
+top_census_beds <- dbGetQuery(con, "
+SELECT 
+    business_name,
+    SUM(census_beds) AS total_census_beds
+FROM 
+    icu_sicu_beds
+GROUP BY 
+    business_name
+ORDER BY 
+    total_census_beds DESC
+LIMIT 10;
+")
+
+# Enhanced Bar Plot with Color Gradient and Improved Data Labels for Census Beds
+ggplot(top_census_beds, aes(x = reorder(business_name, total_census_beds), y = total_census_beds, fill = total_census_beds)) +
+    geom_bar(stat = "identity") +
+    scale_fill_gradient(low = "lightgreen", high = "darkgreen") +
+    geom_text(aes(label = total_census_beds), hjust = ifelse(top_census_beds$total_census_beds > 150, 1.1, -0.1), color = "white", size = 4, fontface = "bold") +
+    coord_flip() +
+    labs(title = "Top 10 Hospitals by Total \n ICU/SICU Census Beds",
+         x = "Hospital Name",
+         y = "Total Census Beds") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = "none")
+
+# Line Plot for Census Beds Trend with Extra Y-Axis Padding and Improved Label Positioning
+ggplot(top_census_beds, aes(x = reorder(business_name, total_census_beds), y = total_census_beds, group = 1)) +
+    geom_line(color = "darkgreen", size = 1.2) +
+    geom_point(color = "forestgreen", size = 3) +
+    geom_text(aes(label = total_census_beds), vjust = -1.5, color = "black", size = 4, fontface = "bold") +
+    labs(title = "Trend of Total ICU/SICU Census Beds Across Top 10 Hospitals",
+         x = "Hospital Name",
+         y = "Total Census Beds") +
+    scale_y_continuous(limits = c(min(top_census_beds$total_census_beds) - 10, max(top_census_beds$total_census_beds) + 20)) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+print("Top 10 Hospitals by Census Beds (ICU or SICU):")
+top_census_beds
+
+```
+
+### Explanation for Census Beds
+#### Bar Plot
+The bar plot displays the **Top 10 Hospitals by Total ICU/SICU Census Beds**. It shows each hospital’s name on the y-axis and the number of census beds on the x-axis, using a color gradient from light green to dark green, where a darker color represents a higher census bed count. Each bar is labeled with the total number of census beds for easy reference.
+
+#### Insights 
+- **Shands Hospital at the University of Florida** has the highest census beds (167) among the top 10 hospitals.
+- The bed counts decrease gradually, with **Ronald Reagan University of California Los Angeles Medical Center** having the lowest among the top 10 (122).
+- The green gradient visually highlights the capacity, allowing for an immediate comparison of census bed availability among these hospitals.
+
+### Line Plot for Census Beds
+The line plot visualizes the **Trend of Total ICU/SICU Census Beds Across Top 10 Hospitals**. The x-axis represents the hospitals, arranged by census bed count, and the y-axis shows the total census beds. Each hospital is represented as a data point connected by a line, with labels for each point indicating the number of census beds.
+
+#### Insights 
+- The trend shows a gradual increase in census beds from **Ronald Reagan University of California Los Angeles Medical Center** to **Shands Hospital at the University of Florida**.
+- The increments are relatively small between hospitals, indicating a fairly even distribution of ICU/SICU census beds among the top 10.
+- The line plot effectively demonstrates the steady rise in bed count, with the largest jump seen from **Dallas County Hospital Association** to **Shands Hospital at the University of Florida**.
+
+### Analysis and Comparison
+- **Bar Plot vs. Line Plot**: The bar plot is more effective for directly comparing individual hospitals’ bed capacities, while the line plot gives a sense of the trend or distribution in census bed counts across the top hospitals.
+- **Census Beds Distribution**: Both plots indicate a gradual distribution of census beds among the hospitals, with no dramatic fluctuations. This implies a relatively balanced availability of ICU/SICU census beds across these institutions.
+- **Top Hospital**: Shands Hospital at the University of Florida stands out in both charts as the hospital with the most ICU/SICU census beds, suggesting it may play a significant role in handling critical care cases within its area.
+
+Together, these visualizations provide a comprehensive view of ICU/SICU census bed distribution among the top hospitals, highlighting **Shands Hospital** as the leading provider and showing how census capacities are spread evenly among the rest.
+
+### The top 10 hospitals by total ICU or SICU Staffed beds
+```{r}
+# SQL query to get the top 10 hospitals by total ICU or SICU staffed beds from icu_sicu_beds table
+top_staffed_beds <- dbGetQuery(con, "
+SELECT 
+    business_name,
+    SUM(staffed_beds) AS total_staffed_beds
+FROM 
+    icu_sicu_beds
+GROUP BY 
+    business_name
+ORDER BY 
+    total_staffed_beds DESC
+LIMIT 10;
+")
+print("Top 10 Hospitals by Staffed Beds (ICU or SICU):")
+print(top_staffed_beds)
+
+# 1. Enhanced Bar Plot with Color Gradient and Improved Data Labels for Staffed Beds
+ggplot(top_staffed_beds, aes(x = reorder(business_name, total_staffed_beds), y = total_staffed_beds, fill = total_staffed_beds)) +
+    geom_bar(stat = "identity") +
+    scale_fill_gradient(low = "lightcoral", high = "darkred") +
+    geom_text(aes(label = total_staffed_beds), hjust = ifelse(top_staffed_beds$total_staffed_beds > 200, 1.1, -0.1), color = "white", size = 4, fontface = "bold") +
+    coord_flip() +
+    labs(title = "Top 10 Hospitals by Total ICU/SICU Staffed Beds",
+         x = "Hospital Name",
+         y = "Total Staffed Beds") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = "none")
+
+# Line Plot for Staffed Beds Trend with Improved Label Positioning and Padding
+ggplot(top_staffed_beds, aes(x = reorder(business_name, total_staffed_beds), y = total_staffed_beds, group = 1)) +
+    geom_line(color = "darkred", size = 1.5) +
+    geom_point(color = "firebrick", size = 4) +
+    geom_text(aes(label = total_staffed_beds), vjust = -1.2, color = "black", size = 4, fontface = "bold") +
+    labs(title = "Trend of Total ICU/SICU Staffed Beds Across Top 10 Hospitals",
+         x = "Hospital Name",
+         y = "Total Staffed Beds") +
+    scale_y_continuous(limits = c(min(top_staffed_beds$total_staffed_beds) - 10, max(top_staffed_beds$total_staffed_beds) + 10)) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+```
+
+### Explanation for Staffed Beds
+#### Bar Plot
+The bar plot shows the **Top 10 Hospitals by Total ICU/SICU Staffed Beds**. The y-axis lists each hospital, while the x-axis shows the number of staffed beds, represented by a color gradient from light coral to dark red, where darker colors indicate a higher number of staffed beds. Each bar includes a label for the total number of staffed beds, providing an easy reference for exact values.
+
+#### Insights 
+- **Vidant Medical Center** has the highest number of ICU/SICU staffed beds (203), followed closely by **Rady Children’s Hospital and Health Center** with 200 beds.
+- The staffed bed counts gradually decrease across the hospitals, with **UC Health University Hospital** having the lowest of the top 10 (151).
+- The color gradient visually emphasizes the differences in bed counts, allowing for quick identification of hospitals with higher staffed capacities.
+
+### Line Plot for Staffed Beds
+The line plot displays the **Trend of Total ICU/SICU Staffed Beds Across Top 10 Hospitals**. The x-axis represents the hospitals, arranged by the number of staffed beds, and the y-axis shows the total staffed beds. Each hospital is marked with a point, connected by a line, with the bed count labels positioned above each point.
+
+#### Insights 
+- There is a gradual increase in staffed beds from **UC Health University Hospital** (151) to **Vidant Medical Center** (203).
+- A significant jump is noticeable between **Shands Hospital at the University of Florida** (167) and **Vidant Medical Center** (203), with a steep rise from this point onwards.
+- The line plot effectively captures the distribution of staffed beds, highlighting this sudden increase among the top-ranked hospitals.
+
+### Analysis and Comparison
+- The bar plot allows for straightforward comparison of each hospital's staffed bed counts. It’s immediately evident which hospitals have the highest and lowest capacities within this top 10.
+- The line plot gives insight into the progression of staffed bed counts across hospitals. The gradual rise with an eventual sharp increase emphasizes the disparity in capacity between some hospitals.
+- **Capacity Insights**: Vidant Medical Center and Rady Children’s Hospital have significantly higher staffed bed counts, possibly reflecting their role as larger critical care centers. In contrast, hospitals like UC Health University Hospital may have fewer staffed beds, potentially indicating different operational focuses or capacities.
+
+The visualizations offer a complete picture of the ICU/SICU staffed bed distribution among top hospitals, emphasizing both individual capacities and the overall trend in bed availability across these facilities.
+
+
+## (3b) Interpretation of Findings
+
+```{r}
+common_hospitals <- intersect(intersect(top_staffed_beds$business_name, top_census_beds$business_name), top_license_beds$business_name)
+
+
+ # Filter the data for these common hospitals in each category
+ 
+top_staffed_common <- top_staffed_beds %>% filter(business_name %in% common_hospitals)
+ 
+top_census_common <- top_census_beds %>% filter(business_name %in% common_hospitals)
+ 
+top_license_common <- top_license_beds %>% filter(business_name %in% common_hospitals)
+
+ # Combine the datasets for visualization
+ 
+combined_common_data <- full_join(full_join(top_staffed_common, top_census_common, by = "business_name"), top_license_common, by = "business_name")
+
+ # Reshape the data for a grouped bar plot and rename the columns
+ 
+combined_common_data_long <- combined_common_data %>%
+ 
+   pivot_longer(cols = starts_with("total_"), names_to = "Bed_Type", values_to = "Bed_Count") %>%
+ 
+   mutate(Bed_Type = recode(Bed_Type,
+ 
+                            "total_staffed_beds" = "Staffed Beds",
+ 
+                            "total_census_beds" = "Census Beds",
+ 
+                            "total_license_beds" = "License Beds"))
+```
+
+```{r}
+# Merge the datasets by business_name
+
+merged_data <- Reduce(function(x, y) merge(x, y, by = "business_name", all = TRUE), 
+
+                       list(top_staffed_beds, top_census_beds, top_license_beds))
+
+common_businesses <- merged_data[complete.cases(merged_data), ]
+ 
+
+# Load tidyr for reshaping
+
+library(tidyr)
+ 
+# Reshape the data to long format
+
+ long_data <- merged_data %>%
+
+     pivot_longer(cols = starts_with("total_"), 
+
+                  names_to = "bed_type", 
+
+                  values_to = "count") %>%
+
+     mutate(bed_type = recode(bed_type, 
+
+                              total_staffed_beds = "Staffed Beds",
+
+                              total_census_beds = "Census Beds",
+
+                              total_license_beds = "License Beds"))
+ 
+ggplot(long_data, aes(x = reorder(business_name, -count), y = count, fill = bed_type)) +
+
+     geom_bar(stat = "identity", position = "dodge") +
+
+     coord_flip() + 
+
+     labs(title = "Comparison of ICU/SICU \n Staffed, Census, License Bed",
+
+          x = "Hospital Name", 
+
+          y = "Number of Beds") +
+
+     theme_minimal() +
+
+     theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+
+     scale_fill_manual(values = c("Staffed Beds" = "steelblue", "Census Beds" = "darkgreen", "License Beds" = "purple"))
+```
+
+```{r}
+# Line Plot for License Beds Trend with Improved Label Positioning, Y-Axis Padding, and Clear X-Axis Labels
+ 
+ggplot(top_license_beds, aes(x = reorder(business_name, total_license_beds), y = total_license_beds, group = 1)) +
+ 
+     geom_line(color = "purple", size = 1.5) +
+ 
+     geom_point(aes(color = business_name %in% common_hospitals), size = 4) +
+ 
+     scale_color_manual(values = c("TRUE" = "red", "FALSE" = "darkgreen"), guide = "none") +
+ 
+     geom_text(aes(label = total_license_beds), vjust = -1.2, color = "black", size = 4, fontface = "bold") +
+ 
+     labs(title = "Total ICU/SICU License Beds Across Top 10 Hospitals",
+ 
+          x = "Hospital Name",
+ 
+          y = "Total License Beds") +
+ 
+     scale_y_continuous(limits = c(min(top_license_beds$total_license_beds) - 10, max(top_license_beds$total_license_beds) + 30)) +
+ 
+     theme_minimal() +
+ 
+     theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+# Print the common hospital names
+print("Common business names across all three bed types:")
+print(common_hospitals)
+
+
+ # Plot
+ 
+ggplot(combined_common_data_long, aes(x = reorder(business_name, Bed_Count), y = Bed_Count, fill = Bed_Type)) +
+ 
+   geom_bar(stat = "identity", position = "dodge") +
+ 
+   scale_fill_manual(values = c("Staffed Beds" = "steelblue", "Census Beds" = "darkgreen", "License Beds" = "purple")) +
+ 
+   coord_flip() +
+ 
+   labs(title = "ICU/SICU Staffed, Census, and License Beds for Common",
+ 
+        x = "Hospital Name",
+ 
+        y = "Total Beds",
+ 
+        fill = "Bed Type") +
+ 
+   theme_minimal() +
+ 
+   theme(
+ 
+     plot.title.position = "plot",
+ 
+     plot.title = element_text(size = 14, face = "bold", hjust = 0.5, margin = margin(b = 10)),
+ 
+     axis.text.x = element_text(angle = 45, hjust = 1)
+ 
+   )
+
+```
+
+
+#### Finding the hospitals that appear in all the three lists
+
+### Explanation 
+1. **Comparison Bar Plot of ICU/SICU Staffed, Census, and License Beds**:
+   - This bar plot shows a comparison of three different types of beds—Staffed Beds, Census Beds, and License Beds—across hospitals that have been identified as common across these categories.
+   - Each hospital’s bar is divided into three colors: blue for Staffed Beds, green for Census Beds, and purple for License Beds, making it easy to see the bed distribution by type.
+   - The plot shows the total count of each bed type for each hospital, facilitating comparison across different facilities.
+
+#### Insights:
+   - **Vidant Medical Center** and **University of Maryland Medical Center** have higher bed counts across all types, indicating their capacity to serve a larger number of critical patients.
+   - The presence of different bed types across hospitals suggests that some facilities prioritize certain bed types over others based on their capacity or healthcare needs.
+   - **University of Maryland Medical Center** has a particularly high count in License Beds compared to other types, which could indicate its readiness for regulatory or licensing requirements.
+
+2. **Line Plot of ICU/SICU License Beds Trend Across Top Hospitals**:
+   - This line plot represents the trend in License Beds for the top 10 hospitals, with each hospital plotted on the x-axis, ordered by bed count.
+   - The line is colored purple, and each point is marked, with some points highlighted in red to denote common hospitals between the different bed types.
+   - The y-axis shows the total number of License Beds, allowing for easy identification of trends in bed capacity across hospitals.
+
+#### Insights:
+   - There is a general upward trend in License Beds, with **Phoenix Children’s Hospital** leading with the highest number.
+   - The highlighted hospitals in red, which are common across bed types, tend to have higher License Bed counts, suggesting they are major players in ICU/SICU capacity.
+   - The steep incline towards the end of the plot reflects a concentration of License Beds among the top facilities, possibly indicating a few key hospitals that are better equipped to handle high patient volumes.
+
+### Analysis
+These visualizations provide insights into how different hospitals allocate resources across ICU/SICU Staffed, Census, and License Beds. Hospitals with high counts across all three types tend to be major healthcare providers, with the capacity to cater to diverse needs. The line plot further highlights the distribution of License Beds, with common hospitals consistently featuring higher bed counts, underscoring their importance in healthcare infrastructure. Together, these plots give a comprehensive view of bed capacity across top hospitals, highlighting both overall trends and specific bed-type preferences.
+
+### Conclusion
+ 
+**Vidant Medical Center** and **University of Maryland Medical Center** stand out across all bed categories (Staffed, Census, and License Beds), showing they have robust ICU/SICU capacity to manage high patient volumes. Their consistent high rankings make them ideal candidates for a pilot intervention program, as they are well-positioned to demonstrate the impact of resource-focused initiatives on critical care outcomes. These hospitals' comprehensive bed availability makes them prime choices for testing scalable interventions in high-capacity healthcare settings.
+
+## (4a) Drill down investigation
+
+```{r}
+# Retrieve Top 10 Hospitals by License, Census, and Staffed Beds where both ICU and SICU beds are present
+# Query for Top 10 Hospitals by License Beds (both ICU and SICU)
+top_10_both_license_beds <- dbGetQuery(con, "
+    SELECT 
+        business_name,
+        SUM(license_beds) AS total_license_beds
+    FROM 
+        icu_sicu_beds
+    WHERE 
+        ims_org_id IN (
+            SELECT ims_org_id
+            FROM icu_sicu_beds
+            WHERE bed_type = 'ICU'
+        )
+        AND ims_org_id IN (
+            SELECT ims_org_id
+            FROM icu_sicu_beds
+            WHERE bed_type = 'SICU'
+        )
+    GROUP BY 
+        business_name
+    ORDER BY 
+        total_license_beds DESC
+    LIMIT 10;
+")
+
+# 1. Bar Plot
+ggplot(top_10_both_license_beds, aes(x = reorder(business_name, total_license_beds), y = total_license_beds)) +
+    geom_bar(stat = "identity", fill = "skyblue") +
+    coord_flip() +
+    geom_text(aes(label = total_license_beds), hjust = -0.2, color = "black", size = 4) +
+    labs(title = "Top 10 Hospitals with Both ICU and SICU Beds \n by License Beds",
+         x = "Hospital Name", 
+         y = "Total License Beds") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# 2. Dot Plot
+ggplot(top_10_both_license_beds, aes(x = total_license_beds, y = reorder(business_name, total_license_beds))) +
+    geom_point(color = "purple", size = 4) +
+    labs(title = "Top 10 Hospitals with Both ICU and SICU Beds \n (License Beds)",
+         x = "Total License Beds", 
+         y = "Hospital Name") +
+    theme_minimal()
+
+# 3. Lollipop Plot 
+ggplot(top_10_both_license_beds, aes(x = reorder(business_name, total_license_beds), y = total_license_beds)) +
+    geom_segment(aes(x = business_name, xend = business_name, y = 0, yend = total_license_beds), color = "gray") +
+    geom_point(color = "darkorange", size = 5) +
+    coord_flip() +
+    labs(title = "Top 10 Hospitals with Both ICU and SICU Beds \n (License Beds)",
+         x = "Hospital Name", 
+         y = "Total License Beds") +
+    theme_minimal()
+
+```
+
+### Explanation 
+
+1. **Bar Plot: Top 10 Hospitals with Both ICU and SICU Beds by License Beds**
+   - This bar plot shows the top 10 hospitals that have both ICU and SICU beds, based on their total license bed counts.
+   - Each bar represents a hospital, with the x-axis showing the total license beds and the y-axis listing the hospital names.
+   - The bars are colored in sky blue, and each bar has a label indicating the exact number of license beds, enhancing readability.
+
+#### Insights:
+   - **University of Maryland Medical Center** leads with the highest number of license beds (221), followed closely by **UC Health University Hospital** (215).
+   - The remaining hospitals have relatively similar license bed counts, ranging from 136 to 167.
+   - This plot suggests that the University of Maryland Medical Center and UC Health University Hospital are well-equipped with licensed beds, likely positioning them as critical healthcare providers in their regions.
+
+2. **Dot Plot: Top 10 Hospitals with Both ICU and SICU Beds (License Beds)**
+   - This dot plot also displays the top 10 hospitals with both ICU and SICU beds, but it uses points instead of bars to represent the total license beds.
+   - Each dot’s position on the x-axis reflects the total license bed count for that hospital, with the hospital names listed on the y-axis.
+   - The dots are colored purple, giving quick comparison of bed counts among hospitals.
+
+#### Insights:
+   - Similar to the bar plot, the University of Maryland Medical Center and UC Health University Hospital stand out with higher license bed counts compared to others in the list.
+   - The use of dots instead of bars makes it easier to visually assess relative differences in bed counts without the visual weight of bars.
+
+3. **Lollipop Plot: Top 10 Hospitals with Both ICU and SICU Beds (License Beds)**
+   - The lollipop plot is another variation that combines a line and a point to show the total license beds for each hospital.
+   - Each hospital is represented by a vertical line (lollipop stick) extending from zero to the license bed count, ending in a large orange dot at the top.
+   - This plot is effective for emphasizing the specific data point (license bed count) for each hospital.
+
+#### Insights:
+   - The lollipop plot confirms the insights from the other two plots, with the University of Maryland Medical Center and UC Health University Hospital showing the highest license bed counts.
+   - The clear separation of dots on top of each line highlights the difference in bed counts among hospitals, making it easy to identify top and lower-ranked hospitals in terms of license bed capacity.
+
+### Analysis 
+- **University of Maryland Medical Center** and **UC Health University Hospital** consistently lead in license bed capacity, suggesting their capability to handle a larger patient load in critical care settings.
+- These visualizations highlight the hospitals with higher license bed counts, suggesting that these facilities likely serve as major critical care centers within their healthcare networks.
+
+
+
+```{r}
+
+# Retrieve Top 10 Hospitals by License, Census, and Staffed Beds where both ICU and SICU beds are present
+# Query for Top 10 Hospitals by License Beds (both ICU and SICU)
+top_10_both_license_beds <- dbGetQuery(con, "
+    SELECT 
+        business_name,
+        SUM(license_beds) AS total_license_beds
+    FROM 
+        icu_sicu_beds
+    WHERE 
+        ims_org_id IN (
+            SELECT ims_org_id
+            FROM icu_sicu_beds
+            WHERE bed_type = 'ICU'
+        )
+        AND ims_org_id IN (
+            SELECT ims_org_id
+            FROM icu_sicu_beds
+            WHERE bed_type = 'SICU'
+        )
+    GROUP BY 
+        business_name
+    ORDER BY 
+        total_license_beds DESC
+    LIMIT 10;
+")
+
+# 1. Bar Plot
+ggplot(top_10_both_license_beds, aes(x = reorder(business_name, total_license_beds), y = total_license_beds)) +
+    geom_bar(stat = "identity", fill = "skyblue") +
+    coord_flip() +
+    geom_text(aes(label = total_license_beds), hjust = -0.2, color = "black", size = 4) +
+    labs(title = "Top 10 Hospitals with Both ICU and SICU Beds \n by License Beds",
+         x = "Hospital Name", 
+         y = "Total License Beds") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# 2. Dot Plot
+ggplot(top_10_both_license_beds, aes(x = total_license_beds, y = reorder(business_name, total_license_beds))) +
+    geom_point(color = "purple", size = 4) +
+    labs(title = "Top 10 Hospitals with Both ICU and SICU Beds \n (License Beds)",
+         x = "Total License Beds", 
+         y = "Hospital Name") +
+    theme_minimal()
+
+# 3. Lollipop Plot
+ggplot(top_10_both_license_beds, aes(x = reorder(business_name, total_license_beds), y = total_license_beds)) +
+    geom_segment(aes(x = business_name, xend = business_name, y = 0, yend = total_license_beds), color = "gray") +
+    geom_point(color = "darkorange", size = 5) +
+    coord_flip() +
+    labs(title = "Top 10 Hospitals with Both ICU and SICU Beds \n (License Beds)",
+         x = "Hospital Name", 
+         y = "Total License Beds") +
+    theme_minimal()
+
+```
+### Explanation
+
+1. **Bar Plot: Top 10 Hospitals with Both ICU and SICU Beds by License Beds**
+   - This bar plot presents the top 10 hospitals with both ICU and SICU beds based on their total license bed counts.
+   - The y-axis shows the hospital names, and the x-axis displays the number of license beds, with bars colored in sky blue.
+   - Each bar is labeled with the exact count of license beds, providing a quick reference for comparison.
+
+#### Insights:
+   - **University of Maryland Medical Center** has the highest license bed count (221), followed by **UC Health University Hospital** (215).
+   - There’s a noticeable drop in license beds as we move down the list, with **Yale New Haven Hospital** having the lowest count in this selection (136).
+   - This ranking suggests that these top hospitals are well-prepared to handle critical care with licensed ICU and SICU beds, positioning them as significant healthcare providers.
+
+2. **Dot Plot: Top 10 Hospitals with Both ICU and SICU Beds (License Beds)**
+   - This dot plot uses points to represent the total license beds for each hospital, with hospitals listed on the y-axis and the total license beds shown on the x-axis.
+   - Each dot’s horizontal position corresponds to the number of license beds, colored in purple for visual clarity.
+
+#### Insights:
+   - The dot plot confirms that the **University of Maryland Medical Center** and **UC Health University Hospital** are leading in license beds.
+
+3. **Lollipop Plot: Top 10 Hospitals with Both ICU and SICU Beds (License Beds)**
+   - The lollipop plot combines a line segment and a dot to represent each hospital's license bed count, with the y-axis showing the hospital names.
+   - A gray line extends from zero to each hospital's license bed count, ending in an orange dot for emphasis.
+   - This format highlights the data points effectively, focusing attention on the actual count of license beds per hospital.
+
+#### Insights:
+   - The lollipop plot, like the previous plots, shows **University of Maryland Medical Center** and **UC Health University Hospital** as the top two in license bed capacity.
+   - The spacing and visual separation between the points make it clear that the top few hospitals have significantly more license beds, while the counts gradually decrease toward the lower-ranked hospitals.
+
+### Analysis 
+These visualizations provide a multi-faceted view of the top 10 hospitals with both ICU and SICU beds based on license bed counts. All three plots illustrate a similar trend, with **University of Maryland Medical Center** and **UC Health University Hospital** standing out in terms of their critical care bed capacities.The bar plot is ideal for direct comparison, the dot plot provides a minimalistic overview, and the lollipop plot highlights individual bed counts with visual emphasis.
+
+These plots indicate that these hospitals, especially the top-ranked ones, have substantial ICU/SICU resources, positioning them as key players in critical care within their healthcare networks.
+
+
+### Top 10 Hospitals by Census Beds (both ICU and SICU)
+```{r}
+
+# Query for Top 10 Hospitals by Census Beds (both ICU and SICU)
+top_10_both_census_beds <- dbGetQuery(con, "
+    SELECT 
+        business_name,
+        SUM(census_beds) AS total_census_beds
+    FROM 
+        icu_sicu_beds
+    WHERE 
+        ims_org_id IN (
+            SELECT ims_org_id
+            FROM icu_sicu_beds
+            WHERE bed_type = 'ICU'
+        )
+        AND ims_org_id IN (
+            SELECT ims_org_id
+            FROM icu_sicu_beds
+            WHERE bed_type = 'SICU'
+        )
+    GROUP BY 
+        business_name
+    ORDER BY 
+        total_census_beds DESC
+    LIMIT 10;
+")
+
+# 1. Bar Plot for Census Beds
+ggplot(top_10_both_census_beds, aes(x = reorder(business_name, total_census_beds), y = total_census_beds)) +
+    geom_bar(stat = "identity", fill = "darkgrey") +
+    labs(title = "Top 10 Hospitals with Both ICU and SICU Beds \n by Census Beds",
+         x = "Hospital Name", 
+         y = "Total Census Beds") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    coord_flip()
+
+# 2. Dot Plot for Census Beds
+ggplot(top_10_both_census_beds, aes(x = total_census_beds, y = reorder(business_name, total_census_beds))) +
+    geom_point(color = "darkgreen", size = 4) +
+    labs(title = "Top 10 Hospitals with Both ICU and SICU Beds \n (Census Beds)",
+         x = "Number of Census Beds", 
+         y = "Hospital Name") +
+    theme_minimal()
+
+# 3. Lollipop Plot for Census Beds
+ggplot(top_10_both_census_beds, aes(x = reorder(business_name, total_census_beds), y = total_census_beds)) +
+    geom_segment(aes(x = business_name, xend = business_name, y = 0, yend = total_census_beds), color = "gray") +
+    geom_point(color = "firebrick", size = 5) +
+    coord_flip() +
+    labs(title = "Top 10 Hospitals with Both ICU and SICU Beds \n (Census Beds)",
+         x = "Hospital Name", 
+         y = "Number of Census Beds") +
+    theme_minimal()
+
+```
+
+### Explanation 
+
+1. **Bar Plot: Top 10 Hospitals with Both ICU and SICU Beds by Census Beds**
+   - This bar plot illustrates the top 10 hospitals with both ICU and SICU beds based on their total census bed counts.
+   - The y-axis displays the hospital names, while the x-axis shows the number of census beds. Each bar is colored in dark grey for a neutral look.
+   - The plot provides a clear comparison of census beds among these hospitals, with each bar representing the exact bed count.
+
+#### Insights:
+   - **Shands Hospital at the University of Florida** has the highest census bed count among the top 10, followed closely by **University of Minnesota Medical Center Fairview** and **University of Maryland Medical Center**.
+   - The census bed counts decrease gradually across the remaining hospitals, with **The Cleveland Clinic Foundation** having the lowest count in this top 10 group.
+   - The relatively high census bed counts suggest that these hospitals have substantial capacity for both ICU and SICU admissions, allowing them to handle a larger number of patients requiring intensive care.
+
+2. **Dot Plot: Top 10 Hospitals with Both ICU and SICU Beds (Census Beds)**
+   - This dot plot presents the total census beds for each of the top 10 hospitals, with the hospitals listed on the y-axis and the number of census beds shown on the x-axis.
+   - Each dot represents a hospital’s census bed count, with dark green coloring for a clean and visually distinct presentation.
+
+#### Insights:
+   - The dot plot confirms the ranking observed in the bar plot, with **Shands Hospital at the University of Florida** having the highest number of census beds.
+   - The distribution of dots provides an uncluttered view of the census bed capacities across the hospitals, making it easy to spot the top-performing facilities in terms of census bed availability.
+
+3. **Lollipop Plot: Top 10 Hospitals with Both ICU and SICU Beds (Census Beds)**
+   - The lollipop plot combines a line (lollipop stick) and a point (lollipop head) for each hospital, showing its census bed count. The hospital names are listed on the y-axis, while the x-axis shows the total census beds.
+
+#### Insights:
+   - This plot also reinforces the information seen in the bar and dot plots, with **Shands Hospital at the University of Florida** and **University of Minnesota Medical Center Fairview** leading in census bed counts.
+   - The use of lines leading to the points helps guide the viewer’s eye, making it easy to trace the census bed count for each hospital.
+   - The lollipop format emphasizes each hospital's census bed capacity individually, helping to differentiate them visually.
+
+### Analysis
+These three visualizations (Bar, Dot, and Lollipop) provide a comprehensive view of the top 10 hospitals with both ICU and SICU beds based on census bed counts. The **Shands Hospital at the University of Florida** and **University of Minnesota Medical Center Fairview** consistently stand out as leaders in census bed capacity, indicating their potential to manage a large number of ICU/SICU patients.
+
+Together, these plots highlight the importance of these hospitals in providing intensive care, with their high census bed counts reflecting their preparedness for managing critical care needs. The ranking and bed count distribution among these hospitals indicate substantial resources allocated to ICU and SICU services.
+
+
+### Top 10 Hospitals by Staffed Beds (both ICU and SICU)
+```{r}
+# Query for Top 10 Hospitals by Staffed Beds (both ICU and SICU)
+top_10_both_staffed_beds <- dbGetQuery(con, "
+    SELECT 
+        business_name,
+        SUM(staffed_beds) AS total_staffed_beds
+    FROM 
+        icu_sicu_beds
+    WHERE 
+        ims_org_id IN (
+            SELECT ims_org_id
+            FROM icu_sicu_beds
+            WHERE bed_type = 'ICU'
+        )
+        AND ims_org_id IN (
+            SELECT ims_org_id
+            FROM icu_sicu_beds
+            WHERE bed_type = 'SICU'
+        )
+    GROUP BY 
+        business_name
+    ORDER BY 
+        total_staffed_beds DESC
+    LIMIT 10;
+")
+
+# 1. Bar Plot with Customized Style (Similar to Provided Image)
+ggplot(top_10_both_staffed_beds, aes(x = reorder(business_name, total_staffed_beds), y = total_staffed_beds)) +
+    geom_bar(stat = "identity", fill = "darkgrey") +
+    labs(title = "Top 10 Hospitals by Staffed SICU Beds",
+         x = "Hospital Name", 
+         y = "Total Staffed SICU Beds") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    coord_flip()
+
+# 2. Dot Plot
+ggplot(top_10_both_staffed_beds, aes(x = total_staffed_beds, y = reorder(business_name, total_staffed_beds))) +
+    geom_point(color = "darkgreen", size = 4) +
+    labs(title = "Top 10 Hospitals with Both ICU and SICU Beds \n (Staffed Beds)",
+         x = "Number of Staffed Beds", 
+         y = "Hospital Name") +
+    theme_minimal()
+
+# 3. Lollipop Plot
+ggplot(top_10_both_staffed_beds, aes(x = reorder(business_name, total_staffed_beds), y = total_staffed_beds)) +
+    geom_segment(aes(x = business_name, xend = business_name, y = 0, yend = total_staffed_beds), color = "gray") +
+    geom_point(color = "firebrick", size = 5) +
+    coord_flip() +
+    labs(title = "Top 10 Hospitals with Both ICU and SICU Beds \n (Staffed Beds)",
+         x = "Hospital Name", 
+         y = "Number of Staffed Beds") +
+    theme_minimal()
+```
+
+
+### Explanation
+
+1. **Bar Plot: Top 10 Hospitals by Staffed SICU Beds**
+   - This bar plot displays the top 10 hospitals with the most staffed SICU beds.
+   - The y-axis lists hospital names, while the x-axis represents the total staffed SICU beds, with each bar showing the bed count.
+   - Dark grey color gives a neutral, professional look, providing clear bed count comparison.
+
+#### Insights:
+   - **University of Maryland Medical Center** leads in SICU staffed beds, closely followed by **Shands Hospital** and **Grady Memorial Hospital**.
+   - The similar bed counts among the top hospitals suggest comparable ICU capacity, crucial for intensive patient care.
+
+2. **Dot Plot: Top 10 Hospitals with Both ICU and SICU Beds (Staffed Beds)**
+   - This plot ranks hospitals by staffed SICU beds using dark green dots.
+   - Y-axis shows hospital names, and the x-axis indicates the number of beds, highlighting differences in bed counts in a minimal style.
+
+#### Insights:
+   - **University of Maryland Medical Center** is the highest, with **Shands Hospital** and **Grady Memorial Hospital** closely following.
+   - The dot arrangement makes it easy to spot the leading hospitals and those with slightly lower SICU capacities.
+
+3. **Lollipop Plot: Top 10 Hospitals with Both ICU and SICU Beds (Staffed Beds)**
+   - This plot combines a line and point (lollipop shape) for each hospital, showing SICU bed counts in firebrick red.
+   - It guides the viewer’s eye to each bed count for clarity.
+
+#### Insights:
+   - The top 3 hospitals maintain their high position in SICU staffed beds, emphasizing their capacity for critical care needs.
+   - Lollipop format visually differentiates each hospital’s bed count, ideal for spotting capacity leaders.
+
+### Analysis and Summary
+These visualizations highlight the **University of Maryland Medical Center** and **Shands Hospital** as leaders in SICU bed capacity, essential for high patient load management. 
+
+## (4b) Final Recommendation
+
+```{r}
+
+ # Find common hospitals that appear in all three lists
+
+ common_hospitals <- intersect(intersect(top_10_both_license_beds$business_name, 
+
+                                         top_10_both_census_beds$business_name), 
+
+                               top_10_both_staffed_beds$business_name)
+ 
+# Filter each data frame to include only common hospitals
+
+ top_license_common <- top_10_both_license_beds %>% filter(business_name %in% common_hospitals)
+
+ top_census_common <- top_10_both_census_beds %>% filter(business_name %in% common_hospitals)
+
+ top_staffed_common <- top_10_both_staffed_beds %>% filter(business_name %in% common_hospitals)
+ 
+# Merge the data frames by business_name
+
+ combined_common_data <- top_license_common %>%
+
+   inner_join(top_census_common, by = "business_name") %>%
+
+   inner_join(top_staffed_common, by = "business_name")
+ 
+# Reshape the data for plotting
+
+ combined_common_data_long <- combined_common_data %>%
+
+   pivot_longer(cols = starts_with("total_"), names_to = "Bed_Type", values_to = "Bed_Count") %>%
+
+   mutate(Bed_Type = recode(Bed_Type,
+
+                            "total_license_beds" = "License Beds",
+
+                            "total_census_beds" = "Census Beds",
+
+                            "total_staffed_beds" = "Staffed Beds"))
+ 
+# Grouped Bar Plot for Common Hospitals
+
+ ggplot(combined_common_data_long, aes(x = reorder(business_name, Bed_Count), y = Bed_Count, fill = Bed_Type)) +
+
+     geom_bar(stat = "identity", position = position_dodge()) +
+
+     coord_flip() +
+
+     labs(title = "Bed Counts by Type Across Common Hospitals",
+
+          x = "Hospital Name",
+
+          y = "Bed Count") +
+
+     scale_fill_manual(values = c("License Beds" = "skyblue", "Census Beds" = "lightgreen", "Staffed Beds" = "salmon")) +
+
+     theme_minimal() +
+
+     theme(axis.text.x = element_text(angle = 45, hjust = 1))
+ 
+# Line Plot for Bed Counts Across Common Hospitals by Bed Type
+
+ ggplot(combined_common_data_long, aes(x = reorder(business_name, Bed_Count), y = Bed_Count, color = Bed_Type, group = Bed_Type)) +
+
+     geom_line(size = 1.2) +
+
+     geom_point(size = 3) +
+
+     labs(title = "Trend of Bed Counts by Type Across Common Hospitals",
+
+          x = "Hospital Name",
+
+          y = "Bed Count") +
+
+     scale_color_manual(values = c("License Beds" = "skyblue", "Census Beds" = "lightgreen", "Staffed Beds" = "salmon")) +
+
+     theme_minimal() +
+
+     theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### Explanation 
+
+1. **Line Plot: Trend of Bed Counts by Type Across Common Hospitals**
+   - This line plot displays the trend of different bed types (License, Census, and Staffed Beds) across hospitals that appear in all three lists.
+   - The x-axis lists the hospital names, while the y-axis shows the bed counts.
+   - Each line color represents a different bed type (License Beds in sky blue, Census Beds in light green, and Staffed Beds in salmon), showing the trend in bed counts across the hospitals.
+
+#### Insights:
+   - **UC Health University Hospital** has the highest number of License Beds, while **Shands Hospital at the University of Florida** and **University of Maryland Medical Center** show lower numbers for Census Beds.
+   - This plot highlights the distribution of each bed type across hospitals, indicating the capacity differences for ICU and SICU services.
+
+2. **Grouped Bar Plot: Bed Counts by Type Across Common Hospitals**
+   - The grouped bar plot presents the bed counts by bed type (License, Census, and Staffed Beds) across common hospitals.
+   - Each group of bars represents a hospital, with each color corresponding to a different bed type.
+   - This visualization allows for easy comparison of the different bed types within each hospital.
+
+#### Insights:
+   - **University of Maryland Medical Center** and **UC Health University Hospital** have higher numbers of License Beds.
+   - The plot helps illustrate each hospital’s capacity distribution, showing which hospitals are more equipped with licensed beds versus census or staffed beds.
+
+### Analysis 
+These visualizations reveal how top hospitals with ICU and SICU facilities allocate and utilize their bed capacities across License, Census, and Staffed Beds. High License Bed counts at facilities like **UC Health University Hospital** and **University of Maryland Medical Center** indicate strong authorized capacity, positioning these hospitals as major centers capable of handling large volumes of critical care cases if needed. However, discrepancies between License and Census Beds in certain hospitals suggest underutilized capacity, possibly due to staffing constraints or strategic occupancy management. Hospitals like **Shands Hospital at the University of Florida** and **University of Minnesota Medical Center Fairview** demonstrate a balanced distribution across all bed types, indicating effective resource management and alignment with patient demand. Facilities with high License but comparatively lower Census Beds seem to maintain a strategic buffer, potentially enhancing their readiness for patient surges. Overall, this analysis highlights how ICU/SICU resource allocation varies by hospital, reflecting differences in operational strategies, regional needs, and emergency preparedness levels, with some hospitals better positioned to scale up during healthcare crises.
+
+## Overall Conclusion and Recommendation 
+
+For the pilot intervention program, we recommend selecting **University of Maryland Medical Center** and **Shands Hospital at the University of Florida** as the primary sites. 
+
+**University of Maryland Medical Center** is an ideal choice due to its consistently high number of licensed and staffed beds, reflecting its strong critical care capacity and readiness to handle high patient volumes. This hospital’s extensive licensed bed count indicates its regulatory preparedness and its role as a major healthcare provider in the region, positioning it as a robust site for intensive care interventions.
+
+**Shands Hospital at the University of Florida** also stands out with high census and staffed bed counts, indicating efficient utilization of resources and high patient demand for critical care services. The balanced bed distribution across types suggests that Shands Hospital is well-equipped to support critical care while managing resources effectively, making it a suitable site for testing new strategies aimed at improving ICU/SICU operations.
+
+Together, these two hospitals represent both capacity and demand in critical care services, aligning with the leadership’s goal of enhancing ICU/SICU efficiency. Their selection would maximize the pilot program's impact, providing insights that can inform broader implementations in facilities with substantial and balanced ICU/SICU resources.
+
+We strongly recommend **University of Maryland Medical Centre** from the step 3a and 4a analysis for the intervention Pilot program. So this hospital consistently ranked high in staffed, census, licensed bed categories demonstrating strong ICU/SICU capacity and resource utilization.
+
+
+
