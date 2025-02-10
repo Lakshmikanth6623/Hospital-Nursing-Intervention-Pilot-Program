@@ -1,6 +1,6 @@
 ---
 title: "Hospital-Nursing-Intervention"
-author: "DA5020 Group5:Hesen Huang,Lakshmi Kanth Reddy Chavva,Srijitha Gangi,Urmeshree Magesh"
+author: "Lakshmi Kanth Reddy Chavva,Srijitha Gangi,Urmeshree Magesh"
 output:
   html_document:
     df_print: paged
